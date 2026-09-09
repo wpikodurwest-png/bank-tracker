@@ -13,16 +13,21 @@
             <a href="/logout" class="btn btn-danger">ലോഗ് ഔട്ട്</a>
         </div>
         
-        <!-- ഫയൽ അപ്‌ലോഡ് ചെയ്യുന്ന സെക്‌ഷൻ -->
+        <!-- ഫയലും പാസ്‌വേഡും അപ്‌ലോഡ് ചെയ്യുന്ന സെക്‌ഷൻ -->
         <div class="card p-4 shadow-sm mb-4">
+            <h5 class="mb-3">സ്റ്റേറ്റ്‌മെന്റ് അപ്‌ലോഡ് ചെയ്യുക</h5>
             <div class="mb-3">
-                <label class="form-label">സ്റ്റേറ്റ്‌മെന്റ് അപ്‌ലോഡ് ചെയ്യുക (Excel)</label>
+                <label class="form-label">Excel ഫയൽ തിരഞ്ഞെടുക്കുക</label>
                 <input class="form-control" type="file" id="statementFile" accept=".xlsx, .xls">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">എക്സൽ പാസ്‌വേഡ് (ഉണ്ടെങ്കിൽ മാത്രം നൽകുക)</label>
+                <input type="password" class="form-control" id="excelPassword" placeholder="Bank Excel Password">
             </div>
             <button class="btn btn-primary" onclick="uploadFile()">അപ്‌ലോഡ് ചെയ്ത് സേവ് ചെയ്യുക</button>
         </div>
 
-        <!-- തുക ചെക്ക് ചെയ്യുന്ന പുതിയ സെക്‌ഷൻ -->
+        <!-- തുക പരിശോധിക്കുന്ന സെക്‌ഷൻ -->
         <div class="card p-4 shadow-sm mb-4">
             <h5 class="mb-3">തുക പരിശോധിക്കുക (Check Amount)</h5>
             <div class="row g-3">
@@ -33,7 +38,6 @@
                     <button class="btn btn-success w-100" onclick="verifyAmount()">പരിശോധിക്കുക (Check)</button>
                 </div>
             </div>
-            <!-- റിസൾട്ട് കാണിക്കുന്ന സ്ഥലം -->
             <div id="checkResult" class="mt-3"></div>
         </div>
 
@@ -90,12 +94,19 @@
 
         function uploadFile() {
             const fileInput = document.getElementById('statementFile');
+            const passwordInput = document.getElementById('excelPassword').value;
+
             if (fileInput.files.length === 0) {
                 alert("ദയവായി ഒരു ഫയൽ തിരഞ്ഞെടുക്കുക!");
                 return;
             }
+
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
+            formData.append('password', passwordInput);
+
+            // ലോഡിങ് അലേർട്ട്
+            alert("ഫയൽ പ്രോസസ്സ് ചെയ്യുന്നു, ദയവായി കാത്തിരിക്കുക...");
 
             fetch('/upload', { method: 'POST', body: formData })
             .then(res => res.json())
@@ -106,10 +117,12 @@
                     alert(data.success);
                     fetchTransactions();
                 }
+            })
+            .catch(err => {
+                alert("അപ്‌ലോഡ് ചെയ്യുന്നതിൽ പിശക് സംഭവിച്ചു!");
             });
         }
 
-        // തുക പരിശോധിക്കുന്ന ഫംഗ്ഷൻ
         function verifyAmount() {
             const inputVal = parseFloat(document.getElementById('checkAmountInput').value);
             const resultDiv = document.getElementById('checkResult');
@@ -119,7 +132,6 @@
                 return;
             }
 
-            // ലിസ്റ്റിൽ ഈ തുക ക്രെഡിറ്റ് ആയി വന്നിട്ടുണ്ടോ എന്ന് നോക്കുന്നു
             const matchedTxn = allTransactions.find(txn => {
                 let cred = parseFloat(txn.Credit) || 0;
                 return cred === inputVal;
@@ -129,7 +141,7 @@
                 resultDiv.innerHTML = `
                     <div class="alert alert-success fw-bold">
                         ✅ Credited! ഈ തുക (₹${inputVal}) അക്കൗണ്ടിൽ ക്രെഡിറ്റ് ചെയ്യപ്പെട്ടിട്ടുണ്ട്.<br>
-                        <small class="text-dark">തീയതി: ${matchedTxنDate || matchedTxn.Date} | വിവരങ്ങൾ: ${matchedTxn.Details}</small>
+                        <small class="text-dark">തീയതി: ${matchedTxn.Date} | വിവരങ്ങൾ: ${matchedTxn.Details}</small>
                     </div>
                 `;
             } else {
