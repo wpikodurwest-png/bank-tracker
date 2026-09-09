@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ml">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ബാങ്ക് ക്രെഡിറ്റ് ട്രാക്കർ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container mt-5">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>ബാങ്ക് സ്റ്റേറ്റ്‌മെന്റ് ക്രെഡിറ്റ് ട്രാക്കർ</h2>
+            <a href="/logout" class="btn btn-danger">ലോഗ് ഔട്ട്</a>
+        </div>
+        
+        <div class="card p-4 shadow-sm mb-4">
+            <div class="mb-3">
+                <label class="form-label">സ്റ്റേറ്റ്‌മെന്റ് അപ്‌ലോഡ് ചെയ്യുക (Excel / CSV)</label>
+                <input class="form-control" type="file" id="statementFile" accept=".csv, .xlsx">
+            </div>
+            <button class="btn btn-primary" onclick="uploadFile()">അപ്‌ലോഡ് ചെയ്ത് സേവ് ചെയ്യുക</button>
+        </div>
+
+        <div class="card p-4 shadow-sm">
+            <h4>ട്രാൻസാക്ഷൻ വിവരങ്ങൾ (ക്രെഡിറ്റ് ആയവ മുകളിൽ)</h4>
+            <div class="table-responsive mt-3">
+                <table class="table table-bordered table-striped">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>തീയതി (Date)</th>
+                            <th>വിവരങ്ങൾ (Details)</th>
+                            <th>റെഫ് നമ്പർ (Ref No)</th>
+                            <th>ഡെബിറ്റ് (Debit)</th>
+                            <th>ക്രെഡിറ്റ് (Credit)</th>
+                            <th>ബാലൻസ് (Balance)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactionTableBody">
+                        <tr><td colspan="6" class="text-center">ഡാറ്റ ലഭ്യമല്ല.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allTransactions = [];
+
+        window.onload = function() {
+            fetchTransactions();
+        };
+
+        function fetchTransactions() {
+            fetch('/get_transactions')
+            .then(res => res.json())
+            .then(data => {
+                if(Array.isArray(data)) {
+                    allTransactions = data;
+                    displayTable(allTransactions);
+                }
+            });
+        }
+
+        function uploadFile() {
+            const fileInput = document.getElementById('statementFile');
+            if (fileInput.files.length === 0) {
+                alert("ദയവായി ഒരു ഫയൽ തിരഞ്ഞെടുക്കുക!");
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            fetch('/upload', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if(data.error) {
+                    alert(data.error);
+                } else {
+                    alert(data.success);
+                    fetchTransactions();
+                }
+            });
+        }
+
+        function displayTable(transactions) {
+            const tbody = document.getElementById('transactionTableBody');
+            tbody.innerHTML = '';
+            if (transactions.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center">വിവരങ്ങൾ ഒന്നും കണ്ടെത്തിയില്ല.</td></tr>`;
+                return;
+            }
+
+            // ക്രെഡിറ്റ് തുക ഉള്ളവ മുകളിൽ വരുത്താൻ സോർട്ട് ചെയ്യുന്നു
+            transactions.sort((a, b) => (parseFloat(b.Credit) || 0) - (parseFloat(a.Credit) || 0));
+
+            transactions.forEach(txn => {
+                let isCredit = (parseFloat(txn.Credit) || 0) > 0;
+                let rowClass = isCredit ? 'table-success fw-bold' : '';
+                
+                let row = `<tr class="${rowClass}">
+                    <td>${txn.Date}</td>
+                    <td>${txn.Details}</td>
+                    <td>${txn.RefNo}</td>
+                    <td>${txn.Debit ? '₹' + txn.Debit : ''}</td>
+                    <td>${txn.Credit ? '₹' + txn.Credit : ''}</td>
+                    <td>₹${txn.Balance}</td>
+                </tr>`;
+                tbody.innerHTML += row;
+            });
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
