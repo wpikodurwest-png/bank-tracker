@@ -3,24 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ബാങ്ക് ക്രെഡിറ്റ് ട്രാക്കർ</title>
+    <title>വാർഡ് ബാങ്ക് ക്രെഡിറ്റ് ട്രാക്കർ</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
     <div class="container mt-5">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>ബാങ്ക് സ്റ്റേറ്റ്‌മെന്റ് ക്രെഡിറ്റ് ട്രാക്കർ</h2>
+            <h2>വാർഡ് ബാങ്ക് സ്റ്റേറ്റ്‌മെന്റ് ട്രാക്കർ</h2>
             <a href="/logout" class="btn btn-danger">ലോഗ് ഔട്ട്</a>
         </div>
         
+        <!-- ഫയൽ അപ്‌ലോഡ് ചെയ്യുന്ന സെക്‌ഷൻ -->
         <div class="card p-4 shadow-sm mb-4">
             <div class="mb-3">
-                <label class="form-label">സ്റ്റേറ്റ്‌മെന്റ് അപ്‌ലോഡ് ചെയ്യുക (Excel / CSV)</label>
-                <input class="form-control" type="file" id="statementFile" accept=".csv, .xlsx">
+                <label class="form-label">സ്റ്റേറ്റ്‌മെന്റ് അപ്‌ലോഡ് ചെയ്യുക (Excel)</label>
+                <input class="form-control" type="file" id="statementFile" accept=".xlsx, .xls">
             </div>
             <button class="btn btn-primary" onclick="uploadFile()">അപ്‌ലോഡ് ചെയ്ത് സേവ് ചെയ്യുക</button>
         </div>
 
+        <!-- തുക ചെക്ക് ചെയ്യുന്ന പുതിയ സെക്‌ഷൻ -->
+        <div class="card p-4 shadow-sm mb-4">
+            <h5 class="mb-3">തുക പരിശോധിക്കുക (Check Amount)</h5>
+            <div class="row g-3">
+                <div class="col-md-8">
+                    <input type="number" class="form-control" id="checkAmountInput" placeholder="തുക ഇവിടെ ടൈപ്പ് ചെയ്യുക (ഉദാ: 50000)">
+                </div>
+                <div class="col-md-4">
+                    <button class="btn btn-success w-100" onclick="verifyAmount()">പരിശോധിക്കുക (Check)</button>
+                </div>
+            </div>
+            <!-- റിസൾട്ട് കാണിക്കുന്ന സ്ഥലം -->
+            <div id="checkResult" class="mt-3"></div>
+        </div>
+
+        <!-- ആകെ ക്രെഡിറ്റ് തുക -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card bg-success text-white p-3 shadow-sm">
+                    <h5>ആകെ ക്രെഡിറ്റ് തുക (Total Credit):</h5>
+                    <h3 id="totalCreditDisplay">₹0.00</h3>
+                </div>
+            </div>
+        </div>
+
+        <!-- ടേബിൾ സെക്‌ഷൻ -->
         <div class="card p-4 shadow-sm">
             <h4>ട്രാൻസാക്ഷൻ വിവരങ്ങൾ (ക്രെഡിറ്റ് ആയവ മുകളിൽ)</h4>
             <div class="table-responsive mt-3">
@@ -82,19 +109,59 @@
             });
         }
 
-        function displayTable(transactions) {
-            const tbody = document.getElementById('transactionTableBody');
-            tbody.innerHTML = '';
-            if (transactions.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center">വിവരങ്ങൾ ഒന്നും കണ്ടെത്തിയില്ല.</td></tr>`;
+        // തുക പരിശോധിക്കുന്ന ഫംഗ്ഷൻ
+        function verifyAmount() {
+            const inputVal = parseFloat(document.getElementById('checkAmountInput').value);
+            const resultDiv = document.getElementById('checkResult');
+
+            if (isNaN(inputVal)) {
+                resultDiv.innerHTML = `<div class="alert alert-warning">ദയവായി ശരിയായ ഒരു തുക ടൈപ്പ് ചെയ്യുക!</div>`;
                 return;
             }
 
-            // ക്രെഡിറ്റ് തുക ഉള്ളവ മുകളിൽ വരുത്താൻ സോർട്ട് ചെയ്യുന്നു
+            // ലിസ്റ്റിൽ ഈ തുക ക്രെഡിറ്റ് ആയി വന്നിട്ടുണ്ടോ എന്ന് നോക്കുന്നു
+            const matchedTxn = allTransactions.find(txn => {
+                let cred = parseFloat(txn.Credit) || 0;
+                return cred === inputVal;
+            });
+
+            if (matchedTxn) {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-success fw-bold">
+                        ✅ Credited! ഈ തുക (₹${inputVal}) അക്കൗണ്ടിൽ ക്രെഡിറ്റ് ചെയ്യപ്പെട്ടിട്ടുണ്ട്.<br>
+                        <small class="text-dark">തീയതി: ${matchedTxنDate || matchedTxn.Date} | വിവരങ്ങൾ: ${matchedTxn.Details}</small>
+                    </div>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger fw-bold">
+                        ❌ ഈ തുക (₹${inputVal}) ക്രെഡിറ്റ് ലിസ്റ്റിൽ കണ്ടെത്തിയില്ല!
+                    </div>
+                `;
+            }
+        }
+
+        function displayTable(transactions) {
+            const tbody = document.getElementById('transactionTableBody');
+            tbody.innerHTML = '';
+            
+            if (transactions.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center">വിവരങ്ങൾ ഒന്നും കണ്ടെത്തിയില്ല.</td></tr>`;
+                document.getElementById('totalCreditDisplay').innerText = '₹0.00';
+                return;
+            }
+
             transactions.sort((a, b) => (parseFloat(b.Credit) || 0) - (parseFloat(a.Credit) || 0));
 
+            let totalCreditSum = 0;
+
             transactions.forEach(txn => {
-                let isCredit = (parseFloat(txn.Credit) || 0) > 0;
+                let credVal = parseFloat(txn.Credit) || 0;
+                if (credVal > 0) {
+                    totalCreditSum += credVal;
+                }
+
+                let isCredit = credVal > 0;
                 let rowClass = isCredit ? 'table-success fw-bold' : '';
                 
                 let row = `<tr class="${rowClass}">
@@ -107,6 +174,8 @@
                 </tr>`;
                 tbody.innerHTML += row;
             });
+
+            document.getElementById('totalCreditDisplay').innerText = '₹' + totalCreditSum.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
         }
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
