@@ -1,6 +1,6 @@
 import os
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
-import pandas as pd
+import openpyxl
 import sqlite3
 
 app = Flask(__name__, template_folder='templates')
@@ -59,34 +59,66 @@ def upload_file():
         return jsonify({'error': 'ഫയൽ തിരഞ്ഞെടുത്തിട്ടില്ല'}), 400
 
     try:
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(file)
-        elif file.filename.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(file)
-        else:
-            return jsonify({'error': 'തെറ്റായ ഫയൽ ഫോർമാറ്റ്!'}), 400
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            return jsonify({'error': 'ദയവായി Excel (.xlsx) ഫയൽ മാത്രം അപ്‌ലോഡ് ചെയ്യുക!'}), 400
 
-        df.columns = df.columns.str.strip()
-        expected_cols = ['Date', 'Details', 'Ref No/Cheque No', 'Debit', 'Credit', 'Balance']
-        for col in expected_cols:
-            if col not in df.columns:
-                df[col] = ''
+        wb = openpyxl.load_workbook(file, data_only=True)
+        sheet = wb.active
 
-        df = df.fillna('')
+        # ഹെഡർ കണ്ടെത്തുന്നു
+        headers = []
+        header_row_idx = 1
+        for i, row in enumerate(sheet.iter_rows(values_only=True), 1):
+            row_str = [str(cell).strip() for cell in row if cell is not None]
+            if 'Date' in row_str and 'Details' in row_str:
+                headers = row_str
+                header_row_idx = i
+                break
+        
+        if not headers:
+            # ഡിഫോൾട്ട് കോളങ്ങൾ എടുക്കുന്നു (അല്ലെങ്കിൽ ആദ്യ റോ)
+            header_row_idx = 1
+            headers = [str(cell.value).strip() if cell.value else '' for cell in sheet[1]]
+
+        # കോളങ്ങളുടെ ഇൻഡക്സ് കണ്ടുപിടിക്കുന്നു
+        col_map = {}
+        for idx, h in enumerate(headers):
+            h_lower = h.lower()
+            if 'date' in h_lower: col_map['Date'] = idx
+            elif 'detail' in h_lower: col_map['Details'] = idx
+            elif 'ref' in h_lower or 'cheque' in h_lower: col_map['Ref No'] = idx
+            elif 'debit' in h_lower: col_map['Debit'] = idx
+            elif 'credit' in h_lower: col_map['Credit'] = idx
+            elif 'balance' in h_lower: col_map['Balance'] = idx
 
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute('DELETE FROM bank_transactions')
 
-        for _, row in df.iterrows():
-            deb = float(str(row['Debit']).replace(',', '')) if str(row['Debit']).replace('.','',1).isdigit() else 0
-            cred = float(str(row['Credit']).replace(',', '')) if str(row['Credit']).replace('.','',1).isdigit() else 0
-            bal = float(str(row['Balance']).replace(',', '')) if str(row['Balance']).replace('.','',1).isdigit() else 0
+        # ഡാറ്റ റീഡ് ചെയ്ത് ഇൻസേർട്ട് ചെയ്യുന്നു
+        for row in sheet.iter_rows(min_row=header_row_idx + 1, values_only=True):
+            if not any(row): continue
+            
+            get_val = lambda key: str(row[col_map[key]]).strip() if key in col_map and col_map[key] < len(row) and row[col_map[key]] is not None else ''
+            
+            tx_date = get_val('Date')
+            details = get_val('Details')
+            ref_no = get_val('Ref No')
+            
+            try: debit = float(str(get_val('Debit')).replace(',', ''))
+            except: debit = 0.0
+            
+            try: credit = float(str(get_val('Credit')).replace(',', ''))
+            except: credit = 0.0
+            
+            try: balance = float(str(get_val('Balance')).replace(',', ''))
+            except: balance = 0.0
 
-            cursor.execute('''
-                INSERT INTO bank_transactions (tx_date, details, ref_no, debit, credit, balance)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (str(row['Date']), str(row['Details']), str(row['Ref No/Cheque No']), deb, cred, bal))
+            if tx_date or details:
+                cursor.execute('''
+                    INSERT INTO bank_transactions (tx_date, details, ref_no, debit, credit, balance)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (tx_date, details, ref_no, debit, credit, balance))
         
         conn.commit()
         conn.close()
