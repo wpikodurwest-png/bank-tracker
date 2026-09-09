@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify, render_template, redirect, url_for, s
 import openpyxl
 import msoffcrypto
 import sqlite3
+import pandas as pd
 
 app = Flask(__name__, template_folder='templates')
 app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here')
@@ -63,16 +64,13 @@ def upload_file():
         return jsonify({'error': 'ഫയൽ തിരഞ്ഞെടുത്തിട്ടില്ല'}), 400
 
     try:
-        if not file.filename.endswith(('.xlsx', '.xls')):
-            return jsonify({'error': 'ദയവായി Excel (.xlsx) ഫയൽ മാത്രം അപ്‌ലോഡ് ചെയ്യുക!'}), 400
-
-        fd, temp_path = tempfile.mkstemp()
+        fd, temp_path = tempfile.mkstemp(suffix=os.path.splitext(file.filename)[1])
         os.close(fd)
         file.save(temp_path)
 
         target_path = temp_path
 
-        # എക്സൽ ഫയലിന് പാസ്‌വേഡ് ഉണ്ടെങ്കിൽ അത് അൺലോക്ക് ചെയ്യുന്നു
+        # 1. പാസ്‌വേഡ് ഉണ്ടെങ്കിൽ msoffcrypto ഉപയോഗിച്ച് ഡീക്രിപ്റ്റ് ചെയ്യാൻ ശ്രമിക്കുന്നു
         if excel_password:
             try:
                 with open(temp_path, "rb") as f:
@@ -84,15 +82,30 @@ def upload_file():
                         with open(decrypted_path, "wb") as decrypted_file:
                             file_decrypted.decrypt(decrypted_file)
                         target_path = decrypted_path
-                    else:
-                        decrypted_path = None
             except Exception as pwd_err:
-                return jsonify({'error': f'പാസ്‌വേഡ് തെറ്റാണ് അല്ലെങ്കിൽ ഫയൽ തുറക്കാൻ കഴിഞ്ഞില്ല: {str(pwd_err)}'}), 400
+                return jsonify({'error': f'പാസ്‌വേഡ് തെറ്റാണ് അല്ലെങ്കിൽ ഫയൽ അൺലോക്ക് ചെയ്യാൻ കഴിഞ്ഞില്ല: {str(pwd_err)}'}), 400
 
-        wb = openpyxl.load_workbook(target_path, data_only=True)
-        sheet = wb.active
+        # 2. ബാങ്ക് ഫയൽ HTML ഫോർമാറ്റാണോ എന്ന് പരിശോധിക്കുന്നു (ചില ബാങ്കുകൾ .xls എക്സ്റ്റൻഷനിൽ HTML ആണ് തരുന്നത്)
+        try:
+            with open(target_path, 'rb') as f:
+                header_bytes = f.read(100)
+                if b'<html' in header_bytes.lower() or b'<table' in header_bytes.lower():
+                    # HTML ടേബിൾ ആയിട്ടുള്ള ഫയൽ പാണ്ടസ് ഉപയോഗിച്ച് റീഡ് ചെയ്യുന്നു
+                    dfs = pd.read_html(target_path)
+                    if dfs:
+                        df = dfs[0]
+                        # ഡാറ്റ ക്ലീൻ ചെയ്ത് ഡാറ്റാബേസിലേക്ക് മാറ്റുന്നു
+                        return save_dataframe_to_db(df)
+        except Exception:
+            pass
 
-        # ഹെഡർ റോ കണ്ടെത്തുന്നു ('Date', 'Details' ഉള്ള വരി)
+        # 3. സാധാരണ എക്സൽ ഫയൽ ആണെങ്കിൽ openpyxl ഉപയോഗിച്ച് റീഡ് ചെയ്യുന്നു
+        try:
+            wb = openpyxl.load_workbook(target_path, data_only=True)
+            sheet = wb.active
+        except Exception as e:
+            return jsonify({'error': f'ഫയൽ ഫോർമാറ്റ് വായിക്കാൻ കഴിഞ്ഞില്ല. ദയവായി ഫയൽ മൈക്രോസോഫ്റ്റ് എക്സലിൽ തുറന്ന് സാധാരണ .xlsx ഫോർമാറ്റിൽ സേവ് ചെയ്ത് അപ്‌ലോഡ് ചെയ്യുക.'}), 400
+
         headers = []
         header_row_idx = 1
         for i, row in enumerate(sheet.iter_rows(values_only=True), 1):
@@ -103,7 +116,7 @@ def upload_file():
                 break
         
         if not headers:
-            header_row_idx = 8  # ബാങ്ക് എക്സൽ ഫോർമാറ്റ് അനുസരിച്ച് സാധാരണ 8-ാം റോയിലാണ് ഹെഡർ വരുന്നത്
+            header_row_idx = 8
             headers = [str(cell.value).strip() if cell.value else '' for cell in sheet[header_row_idx]]
 
         col_map = {}
@@ -129,8 +142,7 @@ def upload_file():
             details = get_val('Details')
             ref_no = get_val('Ref No')
             
-            # തീയതി ഇല്ലാത്തതോ അപ്രസക്തമായതോ ആയ റോകൾ ഒഴിവാക്കുന്നു
-            if not tx_date or '/' not in tx_date and '-' not in tx_date:
+            if not tx_date or ('/' not in tx_date and '-' not in tx_date):
                 continue
 
             try: debit = float(str(get_val('Debit')).replace(',', ''))
@@ -150,7 +162,6 @@ def upload_file():
         conn.commit()
         conn.close()
 
-        # ടെമ്പ് ഫയലുകൾ ക്ലീൻ ചെയ്യുന്നു
         if os.path.exists(temp_path): os.remove(temp_path)
         if 'decrypted_path' in locals() and decrypted_path and os.path.exists(decrypted_path):
             os.remove(decrypted_path)
@@ -159,6 +170,48 @@ def upload_file():
 
     except Exception as e:
         return jsonify({'error': f'പ്രോസസ്സ് ചെയ്യുന്നതിൽ പിശക്: {str(e)}'}), 500
+
+def save_dataframe_to_db(df):
+    # HTML ടേബിൾ ആയി വരുന്ന ബാങ്ക് സ്റ്റേറ്റ്‌മെന്റുകൾ കൈകാര്യം ചെയ്യാൻ
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM bank_transactions')
+
+    # ഡാറ്റയിലെ കോളം പേരുകൾ കണ്ടെത്തുന്നു
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    
+    date_col = next((c for c in df.columns if 'date' in c), None)
+    detail_col = next((c for c in df.columns if 'detail' in c or 'particular' in c), None)
+    ref_col = next((c for c in df.columns if 'ref' in c or 'cheque' in c), None)
+    debit_col = next((c for c in df.columns if 'debit' in c), None)
+    credit_col = next((c for c in df.columns if 'credit' in c), None)
+    balance_col = next((c for c in df.columns if 'balance' in c), None)
+
+    for _, row in df.iterrows():
+        tx_date = str(row[date_col]) if date_col and pd.notna(row[date_col]) else ''
+        if not tx_date or ('/' not in tx_date and '-' not in tx_date):
+            continue
+            
+        details = str(row[detail_col]) if detail_col and pd.notna(row[detail_col]) else ''
+        ref_no = str(row[ref_col]) if ref_col and pd.notna(row[ref_col]) else ''
+        
+        try: debit = float(str(row[debit_col]).replace(',', '')) if debit_col and pd.notna(row[debit_col]) else 0.0
+        except: debit = 0.0
+
+        try: credit = float(str(row[credit_col]).replace(',', '')) if credit_col and pd.notna(row[credit_col]) else 0.0
+        except: credit = 0.0
+
+        try: balance = float(str(row[balance_col]).replace(',', '')) if balance_col and pd.notna(row[balance_col]) else 0.0
+        except: balance = 0.0
+
+        cursor.execute('''
+            INSERT INTO bank_transactions (tx_date, details, ref_no, debit, credit, balance)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (tx_date, details, ref_no, debit, credit, balance))
+
+    conn.commit()
+    conn.close()
+    return jsonify({'success': 'സ്റ്റേറ്റ്‌മെന്റ് വിജയകരമായി സേവ് ചെയ്തു!'})
 
 @app.route('/get_transactions', methods=['GET'])
 def get_transactions():
